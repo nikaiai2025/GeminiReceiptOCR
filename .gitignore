@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+pip-wheel-metadata/
+.mypy_cache/
+.pytest_cache/
+.coverage*
+htmlcov/
+.cache/
+.ipynb_checkpoints/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Editors/IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local config / secrets
+.env
+config/.env
+
+# Project data (large/generated)
+# Ignore contents under data/, but keep directory structure via .gitkeep
+data/*
+!data/.gitkeep
+!data/pdf/
+data/pdf/*
+!data/pdf/.gitkeep
+!data/jpg/
+data/jpg/*
+!data/jpg/.gitkeep
+!data/json/
+data/json/*
+!data/json/.gitkeep
+!data/csv/
+data/csv/*
+!data/csv/.gitkeep
+**/退避/

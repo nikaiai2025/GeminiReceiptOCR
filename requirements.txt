@@ -1,0 +1,12 @@
+# Dependencies for GeminiReceiptOCR
+# Install: pip install -r requirements.txt
+
+# OCR (Google Gemini SDK)
+google-genai
+
+# PDF -> Image conversion
+pdf2image
+Pillow
+
+# Note (Windows): pdf2image requires Poppler installed separately and on PATH.
+python-dotenv
