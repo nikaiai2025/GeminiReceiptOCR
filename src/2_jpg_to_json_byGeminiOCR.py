@@ -1,9 +1,3 @@
-# GEMINI_API_KEY = "[REDACTED]"  # 固定値として設定
-# MODEL_NAME = "gemini-2.5-pro"  
-# MODEL_NAME = "gemini-2.5-flash"  
-# MODEL_NAME = "gemini-2.5-flash-lite"
-# MODEL_NAME = "gemini-2.0-flash-lite"
-# -*- coding: utf-8 -*-
 """
 GeminiOCR.py
 - google-genai (google.genai) を使用
@@ -42,11 +36,6 @@ if not GEMINI_API_KEY:
     raise RuntimeError("GEMINI_API_KEY が未設定です。.env か環境変数に設定してください。")
 
 MODEL_NAME = "gemini-2.5-pro"  
-# MODEL_NAME = "gemini-2.5-flash"  
-#MODEL_NAME = "gemini-2.5-flash-lite"
-#MODEL_NAME = "gemini-2.0-flash-lite"
-#MODEL_NAME = "gemini-1.5-flash"
-#MODEL_NAME = "gemini-1.5-flash-8b"
 
 
 PROMPT_TEXT = """これは日本語のレシートです。以下をJSON形式で出力して。
@@ -291,3 +280,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
