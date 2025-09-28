@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF & Image Merger</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- pdf-lib for PDF manipulation -->
+    <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+    <!-- pdf.js for rendering PDF thumbnails -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
+    <!-- SortableJS for drag-and-drop reordering -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.14.0/Sortable.min.js"></script>
+    <!-- Lucide Icons for UI icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        /* Custom styles for the application */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        .drop-zone {
+            border: 3px dashed #fecaca; /* red-200 */
+            transition: background-color 0.2s, border-color 0.2s;
+        }
+        .drop-zone-over {
+            border-color: #f87171; /* red-400 */
+            background-color: #fee2e2; /* red-50 */
+        }
+        .thumbnail-card {
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .thumbnail-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -2px rgb(0 0 0 / 0.1);
+        }
+        .sortable-ghost {
+            opacity: 0.4;
+            background: #fecaca;
+        }
+        .sortable-chosen {
+            cursor: grabbing;
+        }
+        .loader-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.6);
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .loader {
+            border: 8px solid #f3f3f3;
+            border-top: 8px solid #ef4444; /* red-500 */
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-red-50 text-gray-800">
+    <!-- Loading Spinner Overlay -->
+    <div id="loader-overlay" class="loader-overlay hidden">
+        <div class="text-center">
+            <div class="loader mx-auto"></div>
+            <p id="loader-text" class="text-white mt-4 text-lg font-medium">処理中です...</p>
+        </div>
+    </div>
+
+    <div class="container mx-auto p-4 md:p-8 max-w-6xl">
+        <!-- Header -->
+        <header class="text-center mb-8">
+            <h1 class="text-4xl md:text-5xl font-bold text-red-600">PDF & Image Merger</h1>
+            <p class="mt-2 text-lg text-red-800">PDFや画像をアップロードして、簡単に結合・編集しましょう。</p>
+        </header>
+
+        <main>
+            <!-- File Upload Area -->
+            <section id="upload-section">
+                <div id="drop-zone" class="drop-zone bg-red-100 rounded-lg p-8 md:p-12 text-center cursor-pointer">
+                    <div class="flex flex-col items-center text-red-700">
+                        <i data-lucide="upload-cloud" class="w-16 h-16 mb-4"></i>
+                        <h2 class="text-2xl font-semibold">ファイルをドラッグ＆ドロップ</h2>
+                        <p class="text-red-500 mt-1">または、クリックしてファイルを選択</p>
+                        <p class="text-xs text-red-400 mt-4">対応形式: PDF, JPG, PNG</p>
+                    </div>
+                    <input type="file" id="file-input" class="hidden" multiple accept=".pdf,.jpg,.jpeg,.png">
+                </div>
+            </section>
+            
+            <!-- File List & Controls -->
+            <section id="files-section" class="mt-8 hidden">
+                <div class="flex flex-col md:flex-row justify-between items-center mb-4">
+                     <h2 class="text-2xl font-semibold text-red-700">アップロードされたファイル</h2>
+                     <div class="flex space-x-2 mt-4 md:mt-0">
+                        <button id="merge-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-lg shadow-md transition-transform transform hover:scale-105 flex items-center space-x-2">
+                            <i data-lucide="file-check-2" class="w-5 h-5"></i>
+                            <span>結合してPDFを作成</span>
+                        </button>
+                        <button id="download-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg shadow-md transition-transform transform hover:scale-105 hidden items-center space-x-2">
+                            <i data-lucide="download" class="w-5 h-5"></i>
+                            <span>ダウンロード</span>
+                        </button>
+                     </div>
+                </div>
+
+                <!-- Thumbnails container -->
+                <div id="thumbnail-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                    <!-- Thumbnails will be injected here by JavaScript -->
+                </div>
+                 <div id="success-message" class="mt-4 p-4 bg-green-100 text-green-800 border-l-4 border-green-500 rounded-md hidden">
+                    <p class="font-semibold">成功！</p>
+                    <p>PDFの準備ができました。「ダウンロード」ボタンをクリックしてください。</p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Image Preview Modal -->
+    <div id="preview-modal" class="fixed inset-0 bg-black bg-opacity-75 hidden items-center justify-center p-4 z-[10000]">
+        <div class="max-w-4xl max-h-full bg-white p-2 rounded-lg relative">
+            <img id="preview-image" src="" class="max-w-full max-h-[90vh] object-contain">
+            <button id="close-modal-btn" class="absolute -top-4 -right-4 bg-white text-red-600 rounded-full w-10 h-10 flex items-center justify-center shadow-lg hover:bg-red-50 transition-transform transform hover:scale-110">
+                <i data-lucide="x" class="w-6 h-6"></i>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Set up pdf.js worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
+        
+        // Destructure necessary functions from pdf-lib
+        const { PDFDocument, rgb, degrees } = PDFLib;
+
+        // DOM elements
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const filesSection = document.getElementById('files-section');
+        const thumbnailContainer = document.getElementById('thumbnail-container');
+        const mergeBtn = document.getElementById('merge-btn');
+        const downloadBtn = document.getElementById('download-btn');
+        const loaderOverlay = document.getElementById('loader-overlay');
+        const loaderText = document.getElementById('loader-text');
+        const successMessage = document.getElementById('success-message');
+        const previewModal = document.getElementById('preview-modal');
+        const previewImage = document.getElementById('preview-image');
+        const closeModalBtn = document.getElementById('close-modal-btn');
+
+
+        // State management
+        let fileStore = [];
+        let mergedPdfBytes = null;
+        let sortableInstance = null;
+        let currentObjectUrl = null;
+
+        // --- Event Listeners ---
+        dropZone.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', handleFileSelect);
+        dropZone.addEventListener('dragover', handleDragOver);
+        dropZone.addEventListener('dragleave', handleDragLeave);
+        dropZone.addEventListener('drop', handleDrop);
+        mergeBtn.addEventListener('click', mergeFiles);
+        downloadBtn.addEventListener('click', downloadMergedPdf);
+        closeModalBtn.addEventListener('click', hideModal);
+        previewModal.addEventListener('click', (e) => {
+            if (e.target === previewModal) {
+                hideModal();
+            }
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === "Escape" && !previewModal.classList.contains('hidden')) {
+                hideModal();
+            }
+        });
+
+
+        // --- Drag and Drop Handlers ---
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.add('drop-zone-over');
+        }
+
+        function handleDragLeave(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.remove('drop-zone-over');
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.remove('drop-zone-over');
+            const files = e.dataTransfer.files;
+            handleFiles(files);
+        }
+
+        function handleFileSelect(e) {
+            const files = e.target.files;
+            handleFiles(files);
+        }
+
+        // --- Core File Handling ---
+        async function handleFiles(files) {
+            const validFiles = Array.from(files).filter(file => 
+                ['application/pdf', 'image/jpeg', 'image/png'].includes(file.type)
+            );
+
+            if (validFiles.length === 0) {
+                alert('対応していないファイル形式です。PDF, JPG, PNGファイルをアップロードしてください。');
+                return;
+            }
+            
+            showLoader('ファイルを準備中...');
+            
+            const newItems = [];
+
+            for (const file of validFiles) {
+                if (file.type === 'application/pdf') {
+                    loaderText.textContent = `PDFを展開中: ${file.name}`;
+                    const arrayBuffer = await file.arrayBuffer();
+                    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                    const numPages = pdf.numPages;
+
+                    for (let i = 1; i <= numPages; i++) {
+                        loaderText.textContent = `${file.name} のページを処理中... ${i}/${numPages}`;
+                        const page = await pdf.getPage(i);
+                        
+                        // Create thumbnail
+                        const thumbViewport = page.getViewport({ scale: 0.3 });
+                        const thumbCanvas = document.createElement('canvas');
+                        thumbCanvas.height = thumbViewport.height;
+                        thumbCanvas.width = thumbViewport.width;
+                        await page.render({ canvasContext: thumbCanvas.getContext('2d'), viewport: thumbViewport }).promise;
+                        const thumbnailUrl = thumbCanvas.toDataURL('image/png');
+
+                        // Create main image blob for merging with higher quality
+                        const scale = 300 / 72; // Use 300 DPI for much better quality
+                        const mainViewport = page.getViewport({ scale: scale });
+                        const mainCanvas = document.createElement('canvas');
+                        mainCanvas.height = mainViewport.height;
+                        mainCanvas.width = mainViewport.width;
+                        await page.render({ canvasContext: mainCanvas.getContext('2d'), viewport: mainViewport }).promise;
+                        const blob = await new Promise(resolve => mainCanvas.toBlob(resolve, 'image/png'));
+                        
+                        const pageFile = new File([blob], `${file.name}-page-${i}.png`, { type: 'image/png' });
+
+                        newItems.push({
+                            id: Date.now() + Math.random(),
+                            file: pageFile,
+                            rotation: 0,
+                            thumbnailUrl: thumbnailUrl
+                        });
+                    }
+                } else {
+                    // Handle regular image files
+                    const thumbnailUrl = await new Promise(resolve => {
+                        const reader = new FileReader();
+                        reader.onload = e => resolve(e.target.result);
+                        reader.readAsDataURL(file);
+                    });
+
+                    newItems.push({
+                        id: Date.now() + Math.random(),
+                        file: file,
+                        rotation: 0,
+                        thumbnailUrl: thumbnailUrl
+                    });
+                }
+            }
+            
+            fileStore.push(...newItems);
+            
+            filesSection.classList.remove('hidden');
+            renderThumbnails();
+            hideLoader();
+        }
+
+        // --- UI Rendering ---
+        function renderThumbnails() {
+            thumbnailContainer.innerHTML = '';
+            fileStore.forEach(fileObj => {
+                const card = document.createElement('div');
+                card.className = 'thumbnail-card bg-white rounded-lg p-2 relative group';
+                card.dataset.id = fileObj.id;
+
+                card.innerHTML = `
+                    <div class="thumbnail-preview w-full h-32 flex items-center justify-center bg-gray-100 rounded-md overflow-hidden cursor-pointer">
+                        <img src="${fileObj.thumbnailUrl}" class="block max-w-full max-h-full transition-transform duration-200" style="transform: rotate(${fileObj.rotation}deg);">
+                    </div>
+                    <p class="text-xs truncate mt-2 px-1">${fileObj.file.name}</p>
+                    <div class="absolute top-1 right-1 flex flex-col space-y-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button class="rotate-cw-btn bg-gray-800 bg-opacity-60 text-white p-2 rounded-full hover:bg-opacity-80"><i data-lucide="rotate-cw" class="w-5 h-5"></i></button>
+                        <button class="delete-btn bg-red-600 bg-opacity-80 text-white p-2 rounded-full hover:bg-opacity-100"><i data-lucide="trash-2" class="w-5 h-5"></i></button>
+                    </div>
+                `;
+                thumbnailContainer.appendChild(card);
+                
+                const thumbnailPreview = card.querySelector('.thumbnail-preview');
+                thumbnailPreview.addEventListener('click', () => {
+                    showModal(fileObj.file);
+                });
+            });
+
+            // Re-initialize sortable
+            if (sortableInstance) {
+                sortableInstance.destroy();
+            }
+            sortableInstance = new Sortable(thumbnailContainer, {
+                animation: 150,
+                ghostClass: 'sortable-ghost',
+                chosenClass: 'sortable-chosen',
+                onEnd: updateFileOrder,
+            });
+
+            // Add event listeners for new buttons
+            document.querySelectorAll('.rotate-cw-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const card = e.target.closest('.thumbnail-card');
+                    rotateFile(card.dataset.id, 90);
+                });
+            });
+
+            document.querySelectorAll('.delete-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const card = e.target.closest('.thumbnail-card');
+                    deleteFile(card.dataset.id);
+                });
+            });
+
+            lucide.createIcons(); // Re-render icons
+            resetMergeState();
+        }
+
+        // --- File Manipulation ---
+        function updateFileOrder(evt) {
+            const newOrder = Array.from(thumbnailContainer.children).map(card => card.dataset.id);
+            fileStore.sort((a, b) => newOrder.indexOf(a.id.toString()) - newOrder.indexOf(b.toString()));
+            resetMergeState();
+        }
+
+        function rotateFile(id, angle) {
+            const fileObj = fileStore.find(f => f.id == id);
+            if (fileObj) {
+                fileObj.rotation = (fileObj.rotation + angle) % 360;
+                const img = thumbnailContainer.querySelector(`[data-id="${id}"] img`);
+                img.style.transform = `rotate(${fileObj.rotation}deg)`;
+                resetMergeState();
+            }
+        }
+        
+        function deleteFile(id) {
+            fileStore = fileStore.filter(f => f.id != id);
+            renderThumbnails();
+            if (fileStore.length === 0) {
+                filesSection.classList.add('hidden');
+            }
+        }
+
+        function resetMergeState() {
+            downloadBtn.classList.add('hidden');
+            successMessage.classList.add('hidden');
+            mergedPdfBytes = null;
+        }
+
+        // --- PDF Merging Logic ---
+        async function mergeFiles() {
+            if (fileStore.length === 0) {
+                alert('結合するファイルがありません。');
+                return;
+            }
+
+            showLoader('PDFを生成中...');
+            
+            try {
+                const newPdf = await PDFDocument.create();
+
+                for (let i = 0; i < fileStore.length; i++) {
+                    const fileObj = fileStore[i];
+                    loaderText.textContent = `処理中: ${i + 1} / ${fileStore.length} (${fileObj.file.name})`;
+                    const arrayBuffer = await fileObj.file.arrayBuffer();
+
+                    const tempPdf = await PDFDocument.create();
+                    let image;
+                    if (fileObj.file.type === 'image/jpeg') {
+                        image = await tempPdf.embedJpg(arrayBuffer);
+                    } else {
+                        image = await tempPdf.embedPng(arrayBuffer);
+                    }
+
+                    const { width, height } = image.scale(1);
+                    const tempPage = tempPdf.addPage([width, height]);
+                    tempPage.drawImage(image, { x: 0, y: 0, width, height });
+                    tempPage.setRotation(degrees(fileObj.rotation));
+
+                    const [copiedPage] = await newPdf.copyPages(tempPdf, [0]);
+                    newPdf.addPage(copiedPage);
+                }
+
+                mergedPdfBytes = await newPdf.save();
+                downloadBtn.classList.remove('hidden');
+                successMessage.classList.remove('hidden');
+
+            } catch (error) {
+                console.error("PDF generation failed:", error);
+                alert('PDFの生成に失敗しました。ファイルが破損しているか、サポートされていない形式の可能性があります。');
+            } finally {
+                hideLoader();
+            }
+        }
+
+        // --- Download ---
+        function downloadMergedPdf() {
+            if (!mergedPdfBytes) return;
+
+            const blob = new Blob([mergedPdfBytes], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const timestamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
+            a.download = `merged_${timestamp}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // --- Utility & Modal Functions ---
+        function showLoader(text) {
+            loaderText.textContent = text;
+            loaderOverlay.classList.remove('hidden');
+        }
+
+        function hideLoader() {
+            loaderOverlay.classList.add('hidden');
+        }
+
+        function showModal(file) {
+            if (currentObjectUrl) {
+                URL.revokeObjectURL(currentObjectUrl);
+            }
+            currentObjectUrl = URL.createObjectURL(file);
+            previewImage.src = currentObjectUrl;
+            previewModal.classList.remove('hidden');
+            previewModal.classList.add('flex');
+            lucide.createIcons();
+        }
+
+        function hideModal() {
+            if (currentObjectUrl) {
+                URL.revokeObjectURL(currentObjectUrl);
+                currentObjectUrl = null;
+            }
+            previewImage.src = '';
+            previewModal.classList.add('hidden');
+            previewModal.classList.remove('flex');
+        }
+
+        // Initialize Lucide icons
+        lucide.createIcons();
+    </script>
+</body>
+</html>
+
