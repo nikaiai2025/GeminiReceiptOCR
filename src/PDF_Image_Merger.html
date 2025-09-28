@@ -160,7 +160,6 @@
         const previewImage = document.getElementById('preview-image');
         const closeModalBtn = document.getElementById('close-modal-btn');
 
-
         // State management
         let fileStore = [];
         let mergedPdfBytes = null;
@@ -187,87 +186,60 @@
             }
         });
 
-
         // --- Drag and Drop Handlers ---
-        function handleDragOver(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            dropZone.classList.add('drop-zone-over');
-        }
-
-        function handleDragLeave(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            dropZone.classList.remove('drop-zone-over');
-        }
-
+        function handleDragOver(e) { e.preventDefault(); e.stopPropagation(); dropZone.classList.add('drop-zone-over'); }
+        function handleDragLeave(e) { e.preventDefault(); e.stopPropagation(); dropZone.classList.remove('drop-zone-over'); }
         function handleDrop(e) {
             e.preventDefault();
             e.stopPropagation();
             dropZone.classList.remove('drop-zone-over');
-            const files = e.dataTransfer.files;
-            handleFiles(files);
+            handleFiles(e.dataTransfer.files);
         }
-
-        function handleFileSelect(e) {
-            const files = e.target.files;
-            handleFiles(files);
-        }
+        function handleFileSelect(e) { handleFiles(e.target.files); }
 
         // --- Core File Handling ---
         async function handleFiles(files) {
             const validFiles = Array.from(files).filter(file => 
                 ['application/pdf', 'image/jpeg', 'image/png'].includes(file.type)
             );
-
             if (validFiles.length === 0) {
                 alert('対応していないファイル形式です。PDF, JPG, PNGファイルをアップロードしてください。');
                 return;
             }
             
             showLoader('ファイルを準備中...');
-            
             const newItems = [];
-
+            
             for (const file of validFiles) {
+                const sourceId = Date.now() + file.name; // Unique ID for each source file
                 if (file.type === 'application/pdf') {
                     loaderText.textContent = `PDFを展開中: ${file.name}`;
                     const arrayBuffer = await file.arrayBuffer();
-                    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-                    const numPages = pdf.numPages;
+                    const pdfjsDoc = await pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise;
+                    const numPages = pdfjsDoc.numPages;
 
                     for (let i = 1; i <= numPages; i++) {
                         loaderText.textContent = `${file.name} のページを処理中... ${i}/${numPages}`;
-                        const page = await pdf.getPage(i);
+                        const page = await pdfjsDoc.getPage(i);
                         
-                        // Create thumbnail
                         const thumbViewport = page.getViewport({ scale: 0.3 });
                         const thumbCanvas = document.createElement('canvas');
                         thumbCanvas.height = thumbViewport.height;
                         thumbCanvas.width = thumbViewport.width;
                         await page.render({ canvasContext: thumbCanvas.getContext('2d'), viewport: thumbViewport }).promise;
-                        const thumbnailUrl = thumbCanvas.toDataURL('image/png');
-
-                        // Create main image blob for merging with higher quality
-                        const scale = 300 / 72; // Use 300 DPI for much better quality
-                        const mainViewport = page.getViewport({ scale: scale });
-                        const mainCanvas = document.createElement('canvas');
-                        mainCanvas.height = mainViewport.height;
-                        mainCanvas.width = mainViewport.width;
-                        await page.render({ canvasContext: mainCanvas.getContext('2d'), viewport: mainViewport }).promise;
-                        const blob = await new Promise(resolve => mainCanvas.toBlob(resolve, 'image/png'));
                         
-                        const pageFile = new File([blob], `${file.name}-page-${i}.png`, { type: 'image/png' });
-
                         newItems.push({
                             id: Date.now() + Math.random(),
-                            file: pageFile,
+                            type: 'pdfPage',
+                            sourceId: sourceId,
+                            sourcePdfBytes: arrayBuffer,
+                            pageIndex: i - 1,
                             rotation: 0,
-                            thumbnailUrl: thumbnailUrl
+                            thumbnailUrl: thumbCanvas.toDataURL('image/png'),
+                            fileName: `${file.name}-page-${i}`
                         });
                     }
                 } else {
-                    // Handle regular image files
                     const thumbnailUrl = await new Promise(resolve => {
                         const reader = new FileReader();
                         reader.onload = e => resolve(e.target.result);
@@ -276,6 +248,7 @@
 
                     newItems.push({
                         id: Date.now() + Math.random(),
+                        type: 'image',
                         file: file,
                         rotation: 0,
                         thumbnailUrl: thumbnailUrl
@@ -284,7 +257,6 @@
             }
             
             fileStore.push(...newItems);
-            
             filesSection.classList.remove('hidden');
             renderThumbnails();
             hideLoader();
@@ -297,12 +269,13 @@
                 const card = document.createElement('div');
                 card.className = 'thumbnail-card bg-white rounded-lg p-2 relative group';
                 card.dataset.id = fileObj.id;
+                const displayName = fileObj.type === 'pdfPage' ? fileObj.fileName : fileObj.file.name;
 
                 card.innerHTML = `
                     <div class="thumbnail-preview w-full h-32 flex items-center justify-center bg-gray-100 rounded-md overflow-hidden cursor-pointer">
                         <img src="${fileObj.thumbnailUrl}" class="block max-w-full max-h-full transition-transform duration-200" style="transform: rotate(${fileObj.rotation}deg);">
                     </div>
-                    <p class="text-xs truncate mt-2 px-1">${fileObj.file.name}</p>
+                    <p class="text-xs truncate mt-2 px-1">${displayName}</p>
                     <div class="absolute top-1 right-1 flex flex-col space-y-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button class="rotate-cw-btn bg-gray-800 bg-opacity-60 text-white p-2 rounded-full hover:bg-opacity-80"><i data-lucide="rotate-cw" class="w-5 h-5"></i></button>
                         <button class="delete-btn bg-red-600 bg-opacity-80 text-white p-2 rounded-full hover:bg-opacity-100"><i data-lucide="trash-2" class="w-5 h-5"></i></button>
@@ -310,48 +283,32 @@
                 `;
                 thumbnailContainer.appendChild(card);
                 
-                const thumbnailPreview = card.querySelector('.thumbnail-preview');
-                thumbnailPreview.addEventListener('click', () => {
-                    showModal(fileObj.file);
+                card.querySelector('.thumbnail-preview').addEventListener('click', () => {
+                     const currentFileObj = fileStore.find(f => f.id == card.dataset.id);
+                     if(currentFileObj) showModal(currentFileObj);
                 });
             });
 
-            // Re-initialize sortable
-            if (sortableInstance) {
-                sortableInstance.destroy();
-            }
+            if (sortableInstance) sortableInstance.destroy();
             sortableInstance = new Sortable(thumbnailContainer, {
-                animation: 150,
-                ghostClass: 'sortable-ghost',
-                chosenClass: 'sortable-chosen',
-                onEnd: updateFileOrder,
+                animation: 150, ghostClass: 'sortable-ghost', chosenClass: 'sortable-chosen', onEnd: updateFileOrder,
             });
 
-            // Add event listeners for new buttons
-            document.querySelectorAll('.rotate-cw-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const card = e.target.closest('.thumbnail-card');
-                    rotateFile(card.dataset.id, 90);
-                });
-            });
+            document.querySelectorAll('.rotate-cw-btn').forEach(btn => btn.addEventListener('click', e => {
+                e.stopPropagation(); rotateFile(e.target.closest('.thumbnail-card').dataset.id, 90);
+            }));
+            document.querySelectorAll('.delete-btn').forEach(btn => btn.addEventListener('click', e => {
+                e.stopPropagation(); deleteFile(e.target.closest('.thumbnail-card').dataset.id);
+            }));
 
-            document.querySelectorAll('.delete-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const card = e.target.closest('.thumbnail-card');
-                    deleteFile(card.dataset.id);
-                });
-            });
-
-            lucide.createIcons(); // Re-render icons
+            lucide.createIcons();
             resetMergeState();
         }
 
         // --- File Manipulation ---
         function updateFileOrder(evt) {
             const newOrder = Array.from(thumbnailContainer.children).map(card => card.dataset.id);
-            fileStore.sort((a, b) => newOrder.indexOf(a.id.toString()) - newOrder.indexOf(b.toString()));
+            fileStore.sort((a, b) => newOrder.indexOf(a.id.toString()) - newOrder.indexOf(b.id.toString()));
             resetMergeState();
         }
 
@@ -359,8 +316,7 @@
             const fileObj = fileStore.find(f => f.id == id);
             if (fileObj) {
                 fileObj.rotation = (fileObj.rotation + angle) % 360;
-                const img = thumbnailContainer.querySelector(`[data-id="${id}"] img`);
-                img.style.transform = `rotate(${fileObj.rotation}deg)`;
+                thumbnailContainer.querySelector(`[data-id="${id}"] img`).style.transform = `rotate(${fileObj.rotation}deg)`;
                 resetMergeState();
             }
         }
@@ -368,9 +324,7 @@
         function deleteFile(id) {
             fileStore = fileStore.filter(f => f.id != id);
             renderThumbnails();
-            if (fileStore.length === 0) {
-                filesSection.classList.add('hidden');
-            }
+            if (fileStore.length === 0) filesSection.classList.add('hidden');
         }
 
         function resetMergeState() {
@@ -381,42 +335,47 @@
 
         // --- PDF Merging Logic ---
         async function mergeFiles() {
-            if (fileStore.length === 0) {
-                alert('結合するファイルがありません。');
-                return;
-            }
-
+            if (fileStore.length === 0) { alert('結合するファイルがありません。'); return; }
             showLoader('PDFを生成中...');
             
             try {
                 const newPdf = await PDFDocument.create();
+                const sourcePdfCache = new Map();
 
                 for (let i = 0; i < fileStore.length; i++) {
                     const fileObj = fileStore[i];
-                    loaderText.textContent = `処理中: ${i + 1} / ${fileStore.length} (${fileObj.file.name})`;
-                    const arrayBuffer = await fileObj.file.arrayBuffer();
+                    const displayName = fileObj.type === 'pdfPage' ? fileObj.fileName : fileObj.file.name;
+                    loaderText.textContent = `処理中: ${i + 1} / ${fileStore.length} (${displayName})`;
 
-                    const tempPdf = await PDFDocument.create();
-                    let image;
-                    if (fileObj.file.type === 'image/jpeg') {
-                        image = await tempPdf.embedJpg(arrayBuffer);
-                    } else {
-                        image = await tempPdf.embedPng(arrayBuffer);
+                    if (fileObj.type === 'pdfPage') {
+                        let sourcePdf;
+                        if (sourcePdfCache.has(fileObj.sourceId)) {
+                            sourcePdf = sourcePdfCache.get(fileObj.sourceId);
+                        } else {
+                            sourcePdf = await PDFDocument.load(fileObj.sourcePdfBytes);
+                            sourcePdfCache.set(fileObj.sourceId, sourcePdf);
+                        }
+                        const [copiedPage] = await newPdf.copyPages(sourcePdf, [fileObj.pageIndex]);
+                        copiedPage.setRotation(degrees(fileObj.rotation));
+                        newPdf.addPage(copiedPage);
+                    } else { // type is 'image'
+                        const arrayBuffer = await fileObj.file.arrayBuffer();
+                        let image;
+                        if (fileObj.file.type === 'image/jpeg') {
+                            image = await newPdf.embedJpg(arrayBuffer);
+                        } else {
+                            image = await newPdf.embedPng(arrayBuffer);
+                        }
+                        const page = newPdf.addPage();
+                        const { width, height } = image.scale(1);
+                        page.setSize(width, height);
+                        page.drawImage(image, { x: 0, y: 0, width, height });
+                        page.setRotation(degrees(fileObj.rotation));
                     }
-
-                    const { width, height } = image.scale(1);
-                    const tempPage = tempPdf.addPage([width, height]);
-                    tempPage.drawImage(image, { x: 0, y: 0, width, height });
-                    tempPage.setRotation(degrees(fileObj.rotation));
-
-                    const [copiedPage] = await newPdf.copyPages(tempPdf, [0]);
-                    newPdf.addPage(copiedPage);
                 }
-
                 mergedPdfBytes = await newPdf.save();
                 downloadBtn.classList.remove('hidden');
                 successMessage.classList.remove('hidden');
-
             } catch (error) {
                 console.error("PDF generation failed:", error);
                 alert('PDFの生成に失敗しました。ファイルが破損しているか、サポートされていない形式の可能性があります。');
@@ -428,34 +387,47 @@
         // --- Download ---
         function downloadMergedPdf() {
             if (!mergedPdfBytes) return;
-
             const blob = new Blob([mergedPdfBytes], { type: 'application/pdf' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
             const timestamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
             a.download = `merged_${timestamp}.pdf`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
             URL.revokeObjectURL(url);
         }
 
         // --- Utility & Modal Functions ---
-        function showLoader(text) {
-            loaderText.textContent = text;
-            loaderOverlay.classList.remove('hidden');
-        }
+        function showLoader(text) { loaderText.textContent = text; loaderOverlay.classList.remove('hidden'); }
+        function hideLoader() { loaderOverlay.classList.add('hidden'); }
 
-        function hideLoader() {
-            loaderOverlay.classList.add('hidden');
-        }
-
-        function showModal(file) {
-            if (currentObjectUrl) {
-                URL.revokeObjectURL(currentObjectUrl);
+        async function showModal(fileObj) {
+            if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
+            
+            let imageUrl;
+            if (fileObj.type === 'image') {
+                imageUrl = URL.createObjectURL(fileObj.file);
+            } else { // 'pdfPage'
+                showLoader('プレビューを生成中...');
+                try {
+                    const pdfjsDoc = await pdfjsLib.getDocument({ data: fileObj.sourcePdfBytes.slice(0) }).promise;
+                    const page = await pdfjsDoc.getPage(fileObj.pageIndex + 1);
+                    const viewport = page.getViewport({ scale: 1.5 });
+                    const canvas = document.createElement('canvas');
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+                    await page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
+                    const blob = await new Promise(resolve => canvas.toBlob(resolve));
+                    imageUrl = URL.createObjectURL(blob);
+                } catch (e) {
+                    console.error("Preview generation failed:", e);
+                    alert('プレビューの生成に失敗しました。');
+                    hideLoader(); return;
+                } finally {
+                    hideLoader();
+                }
             }
-            currentObjectUrl = URL.createObjectURL(file);
+            currentObjectUrl = imageUrl;
             previewImage.src = currentObjectUrl;
             previewModal.classList.remove('hidden');
             previewModal.classList.add('flex');
@@ -463,16 +435,11 @@
         }
 
         function hideModal() {
-            if (currentObjectUrl) {
-                URL.revokeObjectURL(currentObjectUrl);
-                currentObjectUrl = null;
-            }
+            if (currentObjectUrl) { URL.revokeObjectURL(currentObjectUrl); currentObjectUrl = null; }
             previewImage.src = '';
             previewModal.classList.add('hidden');
             previewModal.classList.remove('flex');
         }
-
-        // Initialize Lucide icons
         lucide.createIcons();
     </script>
 </body>
