@@ -199,9 +199,17 @@
 
         // --- Core File Handling ---
         async function handleFiles(files) {
-            const validFiles = Array.from(files).filter(file => 
+            // Re-written file handling for robustness
+            const fileList = Array.from(files);
+
+            // Filter for valid file types first
+            let validFiles = fileList.filter(file => 
                 ['application/pdf', 'image/jpeg', 'image/png'].includes(file.type)
             );
+
+            // Then, sort the valid files alphabetically
+            validFiles.sort((a, b) => a.name.localeCompare(b.name));
+
             if (validFiles.length === 0) {
                 alert('対応していないファイル形式です。PDF, JPG, PNGファイルをアップロードしてください。');
                 return;
@@ -444,4 +452,6 @@
     </script>
 </body>
 </html>
+
+
 
