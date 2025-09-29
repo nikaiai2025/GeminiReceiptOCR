@@ -199,15 +199,10 @@
 
         // --- Core File Handling ---
         async function handleFiles(files) {
-            // Re-written file handling for robustness
             const fileList = Array.from(files);
-
-            // Filter for valid file types first
             let validFiles = fileList.filter(file => 
                 ['application/pdf', 'image/jpeg', 'image/png'].includes(file.type)
             );
-
-            // Then, sort the valid files alphabetically
             validFiles.sort((a, b) => a.name.localeCompare(b.name));
 
             if (validFiles.length === 0) {
@@ -219,7 +214,7 @@
             const newItems = [];
             
             for (const file of validFiles) {
-                const sourceId = Date.now() + file.name; // Unique ID for each source file
+                const sourceId = Date.now() + file.name;
                 if (file.type === 'application/pdf') {
                     loaderText.textContent = `PDFを展開中: ${file.name}`;
                     const arrayBuffer = await file.arrayBuffer();
@@ -247,20 +242,55 @@
                             fileName: `${file.name}-page-${i}`
                         });
                     }
-                } else {
-                    const thumbnailUrl = await new Promise(resolve => {
-                        const reader = new FileReader();
-                        reader.onload = e => resolve(e.target.result);
-                        reader.readAsDataURL(file);
-                    });
+                } else { // This is an image file
+                    if (file.type === 'image/jpeg') {
+                        // For JPEGs, normalize orientation using a canvas
+                        const normalizedDataUrl = await new Promise((resolve, reject) => {
+                            const img = new Image();
+                            const url = URL.createObjectURL(file);
+                            img.onload = () => {
+                                const canvas = document.createElement('canvas');
+                                const ctx = canvas.getContext('2d');
+                                canvas.width = img.width;
+                                canvas.height = img.height;
+                                ctx.drawImage(img, 0, 0, img.width, img.height);
+                                const dataUrl = canvas.toDataURL('image/jpeg', 0.98); // High quality
+                                URL.revokeObjectURL(url);
+                                resolve(dataUrl);
+                            };
+                            img.onerror = (err) => {
+                                URL.revokeObjectURL(url);
+                                reject(err);
+                            };
+                            img.src = url;
+                        });
 
-                    newItems.push({
-                        id: Date.now() + Math.random(),
-                        type: 'image',
-                        file: file,
-                        rotation: 0,
-                        thumbnailUrl: thumbnailUrl
-                    });
+                        newItems.push({
+                            id: Date.now() + Math.random(),
+                            type: 'image',
+                            normalizedDataUrl: normalizedDataUrl, // Store normalized data
+                            rotation: 0,
+                            thumbnailUrl: normalizedDataUrl, // Use normalized data for thumb
+                            fileType: file.type,
+                            name: file.name
+                        });
+                    } else { // For PNGs, use the original file
+                        const thumbnailUrl = await new Promise(resolve => {
+                            const reader = new FileReader();
+                            reader.onload = e => resolve(e.target.result);
+                            reader.readAsDataURL(file);
+                        });
+
+                        newItems.push({
+                            id: Date.now() + Math.random(),
+                            type: 'image',
+                            file: file, // Store original file
+                            rotation: 0,
+                            thumbnailUrl: thumbnailUrl,
+                            fileType: file.type,
+                            name: file.name
+                        });
+                    }
                 }
             }
             
@@ -277,7 +307,7 @@
                 const card = document.createElement('div');
                 card.className = 'thumbnail-card bg-white rounded-lg p-2 relative group';
                 card.dataset.id = fileObj.id;
-                const displayName = fileObj.type === 'pdfPage' ? fileObj.fileName : fileObj.file.name;
+                const displayName = fileObj.type === 'pdfPage' ? fileObj.fileName : fileObj.name;
 
                 card.innerHTML = `
                     <div class="thumbnail-preview w-full h-32 flex items-center justify-center bg-gray-100 rounded-md overflow-hidden cursor-pointer">
@@ -352,7 +382,7 @@
 
                 for (let i = 0; i < fileStore.length; i++) {
                     const fileObj = fileStore[i];
-                    const displayName = fileObj.type === 'pdfPage' ? fileObj.fileName : fileObj.file.name;
+                    const displayName = fileObj.type === 'pdfPage' ? fileObj.fileName : fileObj.name;
                     loaderText.textContent = `処理中: ${i + 1} / ${fileStore.length} (${displayName})`;
 
                     if (fileObj.type === 'pdfPage') {
@@ -367,17 +397,29 @@
                         copiedPage.setRotation(degrees(fileObj.rotation));
                         newPdf.addPage(copiedPage);
                     } else { // type is 'image'
-                        const arrayBuffer = await fileObj.file.arrayBuffer();
+                        let arrayBuffer;
+                        if (fileObj.normalizedDataUrl) {
+                            // For normalized JPEGs from data URL
+                            const res = await fetch(fileObj.normalizedDataUrl);
+                            arrayBuffer = await res.arrayBuffer();
+                        } else {
+                            // For original PNG files
+                            arrayBuffer = await fileObj.file.arrayBuffer();
+                        }
+                        
                         let image;
-                        if (fileObj.file.type === 'image/jpeg') {
+                        if (fileObj.fileType === 'image/jpeg') {
                             image = await newPdf.embedJpg(arrayBuffer);
                         } else {
                             image = await newPdf.embedPng(arrayBuffer);
                         }
-                        const page = newPdf.addPage();
+
                         const { width, height } = image.scale(1);
-                        page.setSize(width, height);
-                        page.drawImage(image, { x: 0, y: 0, width, height });
+                        const page = newPdf.addPage([width, height]);
+                        
+                        page.drawImage(image, { x: 0, y: 0, width: width, height: height });
+                        
+                        // Apply manual rotation from UI on top of the normalized image
                         page.setRotation(degrees(fileObj.rotation));
                     }
                 }
@@ -410,11 +452,19 @@
         function hideLoader() { loaderOverlay.classList.add('hidden'); }
 
         async function showModal(fileObj) {
-            if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
+            if (currentObjectUrl) {
+                URL.revokeObjectURL(currentObjectUrl);
+                currentObjectUrl = null;
+            }
             
             let imageUrl;
             if (fileObj.type === 'image') {
-                imageUrl = URL.createObjectURL(fileObj.file);
+                if (fileObj.normalizedDataUrl) { // It's a JPEG with a data URL
+                    imageUrl = fileObj.normalizedDataUrl;
+                } else { // It's a PNG with a File object
+                    imageUrl = URL.createObjectURL(fileObj.file);
+                    currentObjectUrl = imageUrl; // Track blob URL for revocation
+                }
             } else { // 'pdfPage'
                 showLoader('プレビューを生成中...');
                 try {
@@ -427,6 +477,7 @@
                     await page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
                     const blob = await new Promise(resolve => canvas.toBlob(resolve));
                     imageUrl = URL.createObjectURL(blob);
+                    currentObjectUrl = imageUrl; // Track blob URL for revocation
                 } catch (e) {
                     console.error("Preview generation failed:", e);
                     alert('プレビューの生成に失敗しました。');
@@ -435,8 +486,7 @@
                     hideLoader();
                 }
             }
-            currentObjectUrl = imageUrl;
-            previewImage.src = currentObjectUrl;
+            previewImage.src = imageUrl;
             previewModal.classList.remove('hidden');
             previewModal.classList.add('flex');
             lucide.createIcons();
@@ -452,6 +502,4 @@
     </script>
 </body>
 </html>
-
-
 
